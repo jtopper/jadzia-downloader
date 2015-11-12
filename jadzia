@@ -1,0 +1,66 @@
+#!/usr/bin/env ruby
+
+require 'simple-rss'
+require 'yaml'
+require 'erb'
+require 'net/https'
+require 'uri'
+require 'open-uri'
+require 'fileutils'
+require 'progressbar'
+
+include ERB::Util
+
+config    = YAML.load_file('config.yaml')
+file_base = config[:file_base]
+shows     = config[:shows]
+url_base  = config[:url_base]
+args      = shows.map { |s| "series=#{url_encode(s)}" }.join('&')
+
+url = "#{url_base}?#{args}"
+
+uri = URI.parse(url)
+http = Net::HTTP.new(uri.host, uri.port)
+http.use_ssl = true
+http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+
+request = Net::HTTP::Get.new(uri.request_uri)
+
+response = http.request(request)
+
+rss = SimpleRSS.parse response.body
+
+rss.items.each do |i|
+
+    url      = i.guid
+    dir      = i.category
+    filename = URI.unescape( File.basename(url) )
+
+    unless File.directory? File.join(file_base, dir)
+        FileUtils.mkdir_p File.join(file_base, dir)
+    end
+
+    next if File.exist? File.join(file_base, dir, filename)
+
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+    response = http.request_head(uri.request_uri)
+
+    counter = 0
+    ProgressBar
+    pbar = ProgressBar.new(filename, response['content-length'].to_i)
+    File.open(File.join(file_base, dir, filename), 'w') { |f|
+        http.get(uri.request_uri) do |str|
+            f.write str
+            counter += str.length
+            pbar.set counter
+        end
+    }
+    pbar.finish
+
+
+
+
+end
